@@ -461,6 +461,8 @@ header{z-index:20;gap:16px}
 .gal-grid img{width:100%;display:block;filter:saturate(.9)}
 
 .runway-reel{display:none}
+.runway-pulse{position:absolute;z-index:3;bottom:24px;right:clamp(12px,4vw,48px);min-height:44px;padding:0 13px;border:1px solid #c8ac87;background:#171411ed;color:#f4ece2;font:600 12px/1.25 Arial,sans-serif;cursor:pointer}
+.runway-pulse:focus-visible{outline:3px solid white;outline-offset:3px}
 @media(max-width:800px){
   .hero-art .runway-reel{position:absolute;z-index:2;left:6vw;bottom:24px;display:inline-flex;align-items:center;gap:.65em;min-height:44px;padding:0 16px;color:#171411;background:#eee9e0;font:600 12px/1.25 Arial,sans-serif;text-decoration:none}
   .runway-reel:focus-visible{outline:3px solid white;outline-offset:4px}
@@ -537,6 +539,7 @@ header{z-index:20;gap:16px}
 </div>
 <div class="hero-art swan-art" aria-hidden="false">
 <a class="runway-reel" id="runway-reel" href="#reel"><span aria-hidden="true">▶</span>Watch reel · 2:47</a>
+<button class="runway-pulse" id="runway-pulse" type="button">Play runway pulse</button>
 <video autoplay muted loop playsinline preload="metadata" poster="media/open_runway_poster.jpg" aria-label="Models in sheer white gowns walk a hazy runway as the lighting shifts to moody red and a cool-blue spotlight"><source src="media/open_runway.mp4" type="video/mp4"></video>
 </div>
 </section>
@@ -550,7 +553,7 @@ header{z-index:20;gap:16px}
 <p>Two minutes forty-seven. A cut of the films, the commercials, and the worlds in between.</p>
 </div>
 <div class="reel-frame">
-<video id="reel-vid" muted loop playsinline preload="none" poster="media/reel_poster.jpg" data-loop="media/reel_loop.mp4" data-full="media/reel_full.mp4" data-lazy aria-label="Showreel preview, looping silently"></video>
+<video id="reel-vid" muted loop playsinline preload="none" poster="media/reel_poster.jpg" data-loop="media/reel_loop.mp4" data-full="media/reel_full_pulse.mp4" data-lazy aria-label="Showreel preview, looping silently"></video>
 <button type="button" class="reel-play" id="reel-play">Play reel · 2:47</button>
 </div>
 <span class="reel-note">Silent loop until you press play. Sound starts with the cut.</span>
@@ -1179,9 +1182,10 @@ header{z-index:20;gap:16px}
     var p=pv.play(); if(p&&p.catch)p.catch(function(){});
   });
 
-  /* SOUND ON — Web Audio drone + tape hiss + slow heartbeat. Muted until the user toggles. */
+  /* Runway score: an original four-bar, 96 BPM instrumental. */
   var sndBtn=document.getElementById('snd');
-  var bed={ctx:null, master:null, on:false, ducking:false, heart:0};
+  var pulseBtn=document.getElementById('runway-pulse');
+  var bed={ctx:null, master:null, on:false, paused:false, ducking:false, inHero:true, timer:0};
   function ensureBed(){
     if(bed.ctx) return bed;
     var AC=window.AudioContext||window.webkitAudioContext;
@@ -1190,69 +1194,70 @@ header{z-index:20;gap:16px}
     var master=ctx.createGain();
     master.gain.value=0.0001;
     master.connect(ctx.destination);
-    [54.5, 81.6, 108.8].forEach(function(freq,i){
-      var o=ctx.createOscillator();
-      o.type=i===2?'sine':'sawtooth';
-      o.frequency.value=freq;
-      var g=ctx.createGain();
-      g.gain.value=i===0?0.05:i===1?0.03:0.02;
-      var f=ctx.createBiquadFilter();
-      f.type='lowpass'; f.frequency.value=240;
-      var lfo=ctx.createOscillator();
-      lfo.frequency.value=0.06+i*0.025;
-      var lg=ctx.createGain(); lg.gain.value=3.2;
-      lfo.connect(lg); lg.connect(o.frequency);
-      o.connect(g); g.connect(f); f.connect(master);
-      o.start(); lfo.start();
-    });
-    var len=ctx.sampleRate*2, buf=ctx.createBuffer(1,len,ctx.sampleRate), data=buf.getChannelData(0);
-    for(var i=0;i<len;i++) data[i]=Math.random()*2-1;
-    var hiss=ctx.createBufferSource(); hiss.buffer=buf; hiss.loop=true;
-    var hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=2000;
-    var hg=ctx.createGain(); hg.gain.value=0.018;
-    hiss.connect(hp); hp.connect(hg); hg.connect(master); hiss.start();
-    var beat=ctx.createOscillator(); beat.type='sine'; beat.frequency.value=40;
-    var bg=ctx.createGain(); bg.gain.value=0;
-    beat.connect(bg); bg.connect(master); beat.start();
-    function pulse(){
-      if(!bed.on||!bed.ctx) return;
-      var t=bed.ctx.currentTime;
-      bg.gain.cancelScheduledValues(t);
-      bg.gain.setValueAtTime(0.0001,t);
-      bg.gain.linearRampToValueAtTime(0.09,t+0.035);
-      bg.gain.exponentialRampToValueAtTime(0.0008,t+0.16);
-      bg.gain.setValueAtTime(0.0008,t+0.22);
-      bg.gain.linearRampToValueAtTime(0.055,t+0.26);
-      bg.gain.exponentialRampToValueAtTime(0.0008,t+0.42);
-      bed.heart=setTimeout(pulse, 1480);
+    function note(t,hz,type,level,length,slide){
+      var osc=ctx.createOscillator(), amp=ctx.createGain();
+      osc.type=type; osc.frequency.setValueAtTime(hz,t);
+      if(slide) osc.frequency.exponentialRampToValueAtTime(slide,t+length*.65);
+      amp.gain.setValueAtTime(0,t);
+      amp.gain.linearRampToValueAtTime(level,t+.009);
+      amp.gain.exponentialRampToValueAtTime(.0001,t+length);
+      osc.connect(amp); amp.connect(master); osc.start(t); osc.stop(t+length+.01);
+      osc.onended=function(){osc.disconnect();amp.disconnect()};
     }
-    bed.ctx=ctx; bed.master=master; bed.pulse=pulse;
+    var step=0,next=0,eighth=60/96/2,roots=[55,55,65.406,49];
+    bed.start=function(){
+      next=ctx.currentTime+.025;
+      function tick(){
+        if(next<ctx.currentTime) next=ctx.currentTime+.015;
+        while(next<ctx.currentTime+.14){
+          var i=step%8,root=roots[Math.floor(step/8)%4];
+          if(i%2===0) note(next,104,'sine',.26,.14,47);
+          if(i===0||i===3||i===6) note(next,root*(i===6?1.5:1),'triangle',.24,i===0?.52:.27);
+          if(i===1||i===5) note(next,root*8,'sine',.055,.085);
+          next+=eighth; step=(step+1)%32;
+        }
+      }
+      tick(); bed.timer=setInterval(tick,50);
+    };
+    bed.ctx=ctx; bed.master=master;
     return bed;
   }
+  function syncBed(){
+    pulseBtn.textContent=!bed.on?'Play runway pulse':bed.paused?'Resume pulse':'Pause pulse';
+    if(!bed.ctx) return;
+    var audible=bed.on&&!bed.paused&&bed.inHero&&!bed.ducking&&!document.hidden;
+    bed.master.gain.setTargetAtTime(audible?.70:0,bed.ctx.currentTime,.035);
+    if(audible&&!bed.timer) bed.start();
+    if(!audible&&bed.timer){ clearInterval(bed.timer); bed.timer=0; }
+  }
+  if('IntersectionObserver' in window){
+    new IntersectionObserver(function(entries){bed.inHero=entries[0].isIntersecting;syncBed()})
+      .observe(document.querySelector('.hero.swan'));
+  }
+  document.addEventListener('visibilitychange',syncBed);
   function setSound(on){
     var b=ensureBed();
     if(!b) return;
     if(b.ctx.state==='suspended') b.ctx.resume();
     b.on=on;
-    var t=b.ctx.currentTime;
-    b.master.gain.cancelScheduledValues(t);
-    b.master.gain.exponentialRampToValueAtTime(on&&!b.ducking?0.55:0.0001, t+0.6);
+    b.paused=false;
     if(sndBtn){
       sndBtn.setAttribute('aria-pressed', on?'true':'false');
       sndBtn.textContent=on?'Sound on':'Sound off';
     }
-    clearTimeout(b.heart);
-    if(on&&b.pulse) b.pulse();
+    syncBed();
   }
   function duck(dck){
     bed.ducking=!!dck;
-    if(!bed.ctx||!bed.on) return;
-    var t=bed.ctx.currentTime;
-    bed.master.gain.cancelScheduledValues(t);
-    bed.master.gain.exponentialRampToValueAtTime(dck?0.08:0.55, t+0.25);
+    syncBed();
   }
   window.__ntDuck=duck;
   if(sndBtn) sndBtn.addEventListener('click',function(){setSound(!bed.on)});
+  pulseBtn.addEventListener('click',function(){
+    if(!bed.on){setSound(true);return}
+    bed.paused=!bed.paused;
+    syncBed();
+  });
 
   /* When sound is on, hovering a card with data-snd unmutes that preview (if it has audio). */
   document.querySelectorAll('[data-snd]').forEach(function(card){
